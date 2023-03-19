@@ -1,0 +1,343 @@
+import pandas as pd;
+import numpy as np;
+import talib
+import requests;
+import json
+import openai_secret_manager;
+import random
+
+from datetime import datetime, timedelta 
+from sklearn.preprocessing import MinMaxScaler
+from keras.models import Sequential
+from keras.layers import Dense, LSTM, Dropout
+from keras.optimizers import Adam
+from rl.agents import DQNAgent
+from rl.memory import SequentialMemory
+from rl.policy import LinearAnnealedPolicy, EpsGreedyQPolicy
+from gym import spaces;
+
+
+# set API endpoint and headers;
+endpoint = "https://mt4-web-api.xm.com/api/v1"
+headers = {
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {openai_secret_manager.get_secret('xm')['access_token']}"
+}
+
+
+# set trading parameters
+symbol = "EURUSD"
+timeframe = "M1"
+window_size = 24
+trade_size = 0.01
+stop_loss = 0.005
+take_profit = 0.01
+capital = 10000
+
+
+# set sentiment analysis API endpoint and headers
+sentiment_api = "https://api.openai.com/v1/engines/davinci-codex/completions"
+sentiment_headers = {
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {openai_secret_manager.get_secret('openai')['api_key']}"
+}
+
+
+# define functions to collect and preprocess data
+def get_historical_data():
+    # set start and end time for data collection
+    end_time = datetime.utcnow()
+    start_time = end_time - timedelta(days=7)
+    
+    # format start and end time to ISO format
+    end_time_str = end_time.strftime('%Y-%m-%dT%H:%M:%S')
+    start_time_str = start_time.strftime('%Y-%m-%dT%H:%M:%S')
+    
+    # set endpoint for data retrieval
+    url = f"{endpoint}/bars/{symbol}/{timeframe}?from={start_time_str}&to={end_time_str}"
+    
+    # make request to API and get response
+    response = requests.get(url, headers=headers)
+    
+    # if request was successful, convert data to pandas dataframe
+    if response.status_code == 200:
+        data = response.json()['response'][f"{symbol}_{timeframe}"]
+        df = pd.DataFrame.from_records(data)
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
+        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        df.set_index('timestamp', inplace=True)
+        df.sort_index(ascending=True, inplace=True)
+        return df
+    else:
+        print("Error retrieving historical data: ", response.text)
+
+
+def preprocess_data(df):
+    # calculate technical indicators
+    df['ema12'] = talib.EMA(df['close'], timeperiod=12)
+    df['ema26'] = talib.EMA(df['close'], timeperiod=26)
+    df['macd'], df['signal'], df['hist'] = talib.MACD(df['close'], fastperiod=12, slowperiod=26, signalperiod=9)
+    df['rsi'] = talib.RSI(df['close'], timeperiod=14)
+    df['adx'] = talib.ADX(df['high'], df['low'], df['close'], timeperiod=14)
+    df['mom'] = talib.MOM
+
+
+    code for user interface
+
+class UserInterface:
+    def __init__(self):
+        self.actions = ["Buy", "Sell", "Hold"]
+        self.action = ""
+        self.profit = 0
+        self.balance = capital
+        self.equity = capital
+
+    def display_interface(self):
+        print("Current Balance: ${:.2f}".format(self.balance))
+        print("Current Equity: ${:.2f}".format(self.equity))
+        print("Profit/Loss: ${:.2f}".format(self.profit))
+        print("Next Action: ", self.action)
+        print()
+
+    def update_balance(self, profit):
+        self.profit += profit
+        self.balance += profit
+        self.equity += profit
+
+    def get_user_action(self):
+        action = input("Enter your action (Buy/Sell/Hold): ")
+        if action not in self.actions:
+            print("Invalid action. Please enter a valid action.")
+            self.get_user_action()
+        else:
+            self.action = action
+
+    def update_interface(self):
+        # retrieve latest data from broker API
+        url = f"{endpoint}/bars/{symbol}/{timeframe}?count=1"
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()['response'][f"{symbol}_{timeframe}"][0]
+            close_price = data['close']
+            self.equity = self.balance + self.profit + (trade_size * close_price)
+        else:
+            print("Error retrieving latest data: ", response.text)
+
+    def run(self):
+        while True:
+            # update interface with real-time data
+            self.update_interface()
+
+            # display interface
+            self.display_interface()
+
+            # get user action
+            self.get_user_action()
+
+            # execute trade based on user action
+            if self.action == "Buy":
+                execute_trade("buy")
+            elif self.action == "Sell":
+                execute_trade("sell")
+            elif self.action == "Hold":
+                pass
+
+def main():
+    # Initialize the UserInterface class
+    user_interface = UserInterface()
+
+    # Run the user interface to execute trades
+    user_interface.run()
+
+if __name__ == '__main__':
+    main()                
+                
+def main():
+# code to collect data from XM broker API
+data = collect_data(api_key, api_secret, symbol, timeframe, limit)
+
+# code to preprocess data
+preprocessed_data = preprocess_data(data, window_size)
+
+# code to apply trading strategies
+trading_data = apply_trading_strategy(preprocessed_data)
+
+# code to apply risk management
+risk_managed_data = apply_risk_management(trading_data)
+
+# code to apply sentiment analysis
+sentiment_analyzed_data = apply_sentiment_analysis(risk_managed_data)
+
+# code to train deep learning model
+model = train_model(sentiment_analyzed_data)
+
+# code to execute trades
+test_data = collect_data(api_key, api_secret, symbol, timeframe, limit)
+profit = simulate_trading(model, test_data, window_size)
+print("Total profit: ", profit)
+
+# code for user interface
+ui = UserInterface()
+ui.run();
+
+
+# Set up neural network parameters
+gamma = 0.95
+epsilon = 1.0
+epsilon_min = 0.01
+epsilon_decay = 0.995
+learning_rate = 0.001
+memory = deque(maxlen=1000)
+batch_size = 32
+
+# Define trading strategy functions
+def momentum_strategy(data):
+    macd, macd_signal, _ = talib.MACD(data['close'], fastperiod=12, slowperiod=26, signalperiod=9)
+    if macd[-1] > macd_signal[-1]:
+        return 1
+    else:
+        return -1
+
+def mean_reversion_strategy(data):
+    upper, middle, lower = talib.BBANDS(data['close'], timeperiod=20)
+    if data['close'][-1] < lower[-1]:
+        return 1
+    elif data['close'][-1] > upper[-1]:
+        return -1
+    else:
+        return 0
+
+def breakout_strategy(data):
+    high = talib.MAX(data['high'], timeperiod=20)
+    low = talib.MIN(data['low'], timeperiod=20)
+    if data['close'][-1] > high[-1]:
+        return 1
+    elif data['close'][-1] < low[-1]:
+        return -1
+    else:
+        return 0
+
+# Define risk management functions
+def monte_carlo_simulation(data):
+    returns = np.log(data['close'] / data['close'].shift(1))
+    mean = np.mean(returns)
+    std_dev = np.std(returns)
+    sim_returns = np.random.normal(mean, std_dev, 1000)
+    sim_prices = data['close'].iloc[-1] * np.exp(np.cumsum(sim_returns))
+    return sim_prices
+
+def portfolio_optimization(data):
+    returns = np.log(data['close'] / data['close'].shift(1))
+    mean_returns = returns.mean() * 252
+    cov_matrix = returns.cov() * 252
+    num_assets = len(returns.columns)
+    weights = np.random.random(num_assets)
+    weights /= np.sum(weights)
+    returns = np.dot(weights, mean_returns)
+    volatility = np.sqrt(np.dot(weights.T, np.dot(cov_matrix, weights)))
+    return returns, volatility
+
+# Define sentiment analysis function
+def get_sentiment_analysis():
+    # Insert code to collect and analyze data from news and social media sources
+    return sentiment_score
+    
+    # Define neural network functions
+def build_model(input_shape):
+    model = Sequential()
+    model.add(Dense(128, input_shape=input_shape, activation='relu'))
+    model.add(Dropout(0.2))
+    model.add(Dense(256, activation='relu'))
+    model.add(Dropout(0.2))
+    model.add(Dense(256, activation='relu'))
+    model.add(Dropout(0.2))
+    model.add(Dense(128, activation='relu'))
+    model.add(Dropout(0.2))
+    model.add(Dense(3, activation='softmax'))
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    return model
+
+# Define function to get state and reward
+def get_state(data, timestep, window_size):
+    window = data[timestep-window_size:timestep+1]
+    state = np.array([get_technical_indicators(window)])
+    state = np.reshape(state, (state.shape[0], state.shape[2]))
+    return state
+
+# Define function to train the agent
+def train_agent(model_name, episodes, episode_length, window_size):
+    # Load data
+    data = load_data()
+    # Initialize agent and model
+    agent = Agent(window_size, pretrained=True, model_name=model_name)
+    model = agent.model
+    # Start training
+    for episode in range(episodes):
+        state = get_state(data, 0, window_size+1)
+        total_profit = 0
+        agent.inventory = []
+        for t in range(episode_length):
+            action = agent.act(state)
+            next_state = get_state(data, t+1, window_size+1)
+            reward = 0
+            if action == 1:
+                agent.inventory.append(data[t])
+            elif action == 2 and len(agent.inventory) > 0:
+                buy_price = agent.inventory.pop(0)
+                reward = max(data[t] - buy_price, 0)
+                total_profit += data[t] - buy_price
+            done = True if t == episode_length - 1 else False
+            agent.memory.append((state, action, reward, next_state, done))
+            state = next_state
+            if done:
+                print('Episode: {}/{} | Total Profit: {}'.format(episode+1, episodes, total_profit))
+            if len(agent.memory) > batch_size:
+                agent.replay(batch_size)
+        if (episode+1) % 10 == 0:
+            model.save('models/{}_episode{}.h5'.format(model_name, episode+1))
+
+# Train the agent
+train_agent('deepq', 100, 200, 10)
+
+# Define function to make predictions
+def predict_action(model, state):
+    """Make a prediction for the next action to take."""
+    q_values = model.predict(np.array(state).reshape(1, -1))[0]
+    action = np.argmax(q_values)
+    return action
+
+# Define function to get next state and reward
+def get_state_reward(next_state):
+    """Calculate the next state and reward."""
+    price_diff = next_state[0]['Close'] - next_state[0]['Open']
+    reward = 0
+    if price_diff > 0:
+        reward = 1
+    elif price_diff < 0:
+        reward = -1
+    return next_state, reward
+
+# Define function to simulate trading
+def simulate_trading(model, data, window_size):
+    """Simulate trading using the trained model."""
+    state = get_state(data, 0, window_size + 1)
+    total_profit = 0
+    wallet = 10000
+    btc_balance = 0
+    for t in range(window_size, len(data) - 1):
+        action = predict_action(model, state)
+        next_state = get_state(data, t + 1, window_size + 1)
+        next_state, reward = get_state_reward(next_state)
+        if action == 1 and wallet > 0:
+            btc_balance += wallet / data[t]['Close']
+            wallet = 0
+        elif action == 2 and btc_balance > 0:
+            wallet += btc_balance * data[t]['Close']
+            btc_balance = 0
+        total_profit += reward
+        state = next_state
+    return total_profit
+
+# Simulate trading using the trained model
+profit = simulate_trading(model, test_data, window_size)
+print("Total profit: ", profit)
